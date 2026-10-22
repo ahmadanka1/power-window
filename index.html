@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Power Window</title>
+<style>
+:root{--bg:#eef1f5;--panel:#fff;--ink:#17202f;--mute:#667085;--line:#d5dbe5;--on:#e69a00;--soft:#fbe7b8;--pred:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1320;--panel:#151d2e;--ink:#e8edf6;--mute:#8d99ae;--line:#26314a;--on:#f5b232;--soft:#4a3a12;--pred:#6ea0ff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font:700 1.5rem/1.2 Georgia,serif;margin:8px 0 2px}
+h2{font:600 1.05rem/1.3 Georgia,serif;margin:0 0 10px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.next{font:700 2.1rem/1.1 Georgia,serif;margin:4px 0}.next small{font:400 1rem system-ui;color:var(--mute)}
+.mute{color:var(--mute);font-size:.9rem;margin:6px 0 0}
+button,input,textarea{font:inherit;color:inherit}
+button{background:var(--on);color:#1a1300;border:0;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer}
+button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+:focus-visible{outline:2px solid var(--pred);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.row>*{flex:1 1 120px}
+label{display:block;font-size:.85rem;color:var(--mute)}
+input,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--mute);font-weight:500}
+.tr{display:grid;grid-template-columns:72px 1fr;gap:8px;align-items:center;margin:3px 0;font-size:.82rem}
+.track{position:relative;height:16px;background:var(--bg) linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/25% 100%;border-radius:4px}
+.bar{position:absolute;top:2px;bottom:2px;background:var(--on);border-radius:3px}
+.band{position:absolute;top:0;bottom:0;background:var(--soft);border-radius:3px}
+.pbar{position:absolute;top:2px;bottom:2px;border:2px dashed var(--pred);border-radius:3px}
+.axis{display:grid;grid-template-columns:72px 1fr;gap:8px;font-size:.75rem;color:var(--mute)}.axis div:last-child{display:flex;justify-content:space-between}
+.good{color:#1a8f4b}.bad{color:#d1432f}
+</style>
+</head>
+<body>
+<main>
+<h1>Power window</h1>
+<p class="mute" id="sync">Loading...</p>
+<section id="pred"></section>
+
+<section>
+<h2>Log today</h2>
+<div class="row"><button id="came">Power came</button><button id="went" class="alt">Power went</button></div>
+<p class="mute" id="status"></p>
+<h2 style="margin-top:14px">Add or fix a day</h2>
+<div class="row">
+<div><label for="fd">Date</label><input type="date" id="fd"></div>
+<div><label for="ff">From</label><input type="time" id="ff"></div>
+<div><label for="ft">To</label><input type="time" id="ft"></div>
+<button id="save">Save day</button>
+</div>
+<p class="mute" id="msg"></p>
+</section>
+
+<section>
+<h2>Supply by day</h2>
+<div class="axis"><div></div><div><span>0:00</span><span>6:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div></div>
+<div id="tl"></div>
+</section>
+
+<section>
+<h2>Predicted vs actual</h2>
+<p class="mute" style="margin:0 0 8px">Each past day is predicted using only the days before it. Times are matched on a 30-minute grid.</p>
+<div class="scroll"><table id="hist"></table></div>
+</section>
+
+<section>
+<h2>The methods</h2>
+<div class="scroll"><table id="models"></table></div>
+</section>
+
+<section>
+<h2>Save to GitHub</h2>
+<div class="row">
+<div><label for="go">Username</label><input id="go" autocomplete="off"></div>
+<div><label for="gr">Repository</label><input id="gr" autocomplete="off"></div>
+</div>
+<label for="gt" style="margin-top:8px">Access token (needed to save, stays on this device)</label>
+<input id="gt" type="password" autocomplete="off">
+<div class="row" style="margin-top:8px"><button id="gsave">Save settings and sync</button></div>
+<label for="imp" style="margin-top:14px">Import rows pasted from Excel (day, dd/mm, from, to)</label>
+<textarea id="imp" rows="3"></textarea>
+<div class="row" style="margin-top:8px"><button id="doimp" class="alt">Import rows</button></div>
+</section>
+</main>
+
+<script src="engine.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const p2=n=>String(n).padStart(2,'0');
+const isoOf=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const nowMin=()=>{const d=new Date();return d.getHours()*60+d.getMinutes()};
+const fmt=m=>{m=Math.round(m);const h=Math.floor(m/60)%24;return(h%12||12)+':'+p2(m%60)+(h>=12?' PM':' AM')};
+const fmtDur=m=>Math.floor(Math.round(m)/60)+'h '+p2(Math.round(m)%60)+'m';
+const lbl=iso=>new Date(iso+'T00:00').toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'numeric'});
+const addDay=(iso,n)=>{const d=new Date(iso+'T00:00');d.setDate(d.getDate()+n);return isoOf(d)};
+const toHM=m=>m==null?null:p2(Math.floor(m/60))+':'+p2(m%60);
+const fromHM=s=>s==null?null:+s.slice(0,2)*60+ +s.slice(3,5);
+const cmp=(a,b)=>a.date<b.date?-1:1;
+const fromRepo=d=>({date:d.date,from:fromHM(d.from),to:fromHM(d.to)});
+const toRepo=d=>({date:d.date,from:toHM(d.from),to:toHM(d.to)});
+const merge=(a,b)=>{const m=new Map(a.map(d=>[d.date,d]));b.forEach(d=>m.set(d.date,d));return[...m.values()].sort(cmp)};
+
+/* ---- local state ---- */
+const store=(k,v)=>{try{if(v===undefined)return JSON.parse(localStorage.getItem(k));localStorage.setItem(k,JSON.stringify(v))}catch(e){return null}};
+let days=[],dirty=false;
+{const c=store('power-cache');if(c){days=c.days||[];dirty=!!c.dirty}}
+const cache=()=>store('power-cache',{days,dirty});
+let cfg=store('power-gh')||{};
+if(!cfg.owner){const h=location.hostname,seg=location.pathname.split('/')[1];
+  cfg.owner=h.endsWith('github.io')?h.split('.')[0]:'ahmadanka1';cfg.repo=h.endsWith('github.io')&&seg?seg:'power-window'}
+const setSync=t=>$('sync').textContent=t;
+
+/* ---- GitHub contents API ---- */
+const url=()=>`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/data.json`;
+const hdr=()=>({Accept:'application/vnd.github+json',...(cfg.token?{Authorization:'Bearer '+cfg.token}:{})});
+async function ghGet(){
+  const r=await fetch(url(),{cache:'no-store',headers:hdr()});
+  if(r.status===404)return{days:[],sha:undefined};
+  if(!r.ok)throw new Error('GitHub '+r.status);
+  const j=await r.json();
+  const data=JSON.parse(decodeURIComponent(escape(atob(j.content.replace(/\n/g,'')))));
+  return{days:(data.days||[]).map(fromRepo).sort(cmp),sha:j.sha};
+}
+async function ghPut(list,sha,msg){
+  const text='{"days":[\n'+list.map(d=>' '+JSON.stringify(toRepo(d))).join(',\n')+'\n]}\n';
+  const r=await fetch(url(),{method:'PUT',headers:{...hdr(),'Content-Type':'application/json'},
+    body:JSON.stringify({message:msg,content:btoa(unescape(encodeURIComponent(text))),sha})});
+  if(r.status===409||r.status===422){const e=new Error('conflict');e.conflict=true;throw e}
+  if(!r.ok)throw new Error('GitHub '+r.status+(r.status===401||r.status===403||r.status===404?', check the token and repo name':''));
+}
+/* Every change is applied to the newest copy in the repo, so two devices don't overwrite each other. */
+let queue=Promise.resolve();
+const mutate=(fn,msg)=>queue=queue.then(()=>doMutate(fn,msg));
+async function doMutate(fn,msg){
+  days=fn(days).sort(cmp);render();
+  if(!cfg.token){dirty=true;cache();setSync('Saved on this device only. Add a GitHub token below to save to the repo.');return}
+  setSync('Saving to GitHub...');
+  try{
+    for(let a=0;a<2;a++){
+      try{
+        const r=await ghGet();
+        const next=fn(dirty?merge(r.days,days):r.days).sort(cmp);
+        await ghPut(next,r.sha,msg);
+        days=next;dirty=false;cache();render();setSync('Saved to GitHub.');return;
+      }catch(e){if(!e.conflict||a)throw e}
+    }
+  }catch(e){dirty=true;cache();setSync('Not synced ('+e.message+'). Kept on this device and will retry on the next change.')}
+}
+async function pull(){
+  if(!cfg.owner||!cfg.repo)return;
+  try{
+    const r=await ghGet();
+    if(dirty||(!r.sha&&days.length)){if(cfg.token){await mutate(d=>d,'Sync');return}}
+    else{days=r.days;cache();render()}
+    setSync(cfg.token?'Loaded from GitHub. Changes are saved to the repo.':'Loaded from GitHub (read only). Add a token to save changes.');
+  }catch(e){setSync('Could not load from GitHub ('+e.message+'). Showing data stored on this device.')}
+}
+
+/* ---- rendering ---- */
+function render(){
+  const A=PW.analyse(days),n=A.next;
+  if(n){
+    const date=addDay(A.c[A.c.length-1].date,1),st=A.stats.ens,top=n.cands.filter(c=>Math.abs(c.t-n.start)>PW.G).slice(0,2);
+    $('pred').innerHTML=`<h2>Next supply, ${lbl(date)}</h2>
+    <div class="next">${fmt(n.start)} <small>to ${fmt(n.start+n.dur)}</small></div>
+    <p class="mute">${Math.round(n.agree*100)}% of the methods agree with this time.${top.length?' Other guesses: '+top.map(c=>fmt(c.t)+' ('+c.n+' method'+(c.n>1?'s':'')+')').join(', ')+'.':''}</p>
+    <p class="mute">${st.n?`On past days this approach was right within 30 minutes on ${Math.round(st.hit*100)}% of ${st.n} tests, with an average miss of ${fmtDur(st.mae)}.`:'Not enough history to test it yet.'}</p>`;
+  }else $('pred').innerHTML='<h2>Next supply</h2><p class="mute">Log at least 3 complete days to get a prediction.</p>';
+
+  const today=isoOf(new Date()),t=days.find(d=>d.date===today);
+  $('status').textContent=!t?'Nothing logged for today yet.':t.to==null?'Power came at '+fmt(t.from)+'. Tap "Power went" when it cuts out.':'Today: '+fmt(t.from)+' to '+fmt(t.to)+'.';
+
+  const pct=v=>(v/14.4)+'%';let h='';
+  if(n){const date=addDay(A.c[A.c.length-1].date,1);
+    h+=`<div class="tr"><div>${lbl(date)}</div><div class="track"><div class="pbar" style="left:${pct(n.start)};width:${pct(Math.min(n.dur,1440-n.start))}"></div></div></div>`}
+  for(const d of days.slice(-14).reverse()){
+    const to=d.to==null?Math.max(nowMin(),d.from):d.to;
+    h+=`<div class="tr"><div>${lbl(d.date)}</div><div class="track"><div class="bar" style="left:${pct(d.from)};width:${pct(to-d.from)}"></div></div></div>`}
+  $('tl').innerHTML=h;
+
+  const del=d=>`<td><button class="alt" data-del="${d.date}" aria-label="Delete ${lbl(d.date)}">Delete</button></td>`;
+  const rows=A.c.map((d,i)=>{
+    const p=A.r&&i>=3?A.r.ens[i]:null,a=PW.snap(d.from);
+    if(p==null)return`<tr><td>${lbl(d.date)}</td><td>-</td><td>${fmt(d.from)}</td><td>-</td><td>${fmt(d.to)}</td>${del(d)}</tr>`;
+    const e=a-p;return`<tr><td>${lbl(d.date)}</td><td>${fmt(p)}</td><td>${fmt(d.from)}</td><td class="${Math.abs(e)<=PW.G?'good':'bad'}">${e===0?'exact':(e>0?'+':'-')+fmtDur(Math.abs(e))}</td><td>${fmt(d.to)}</td>${del(d)}</tr>`}).reverse();
+  const open=days.filter(d=>d.to==null).map(d=>`<tr><td>${lbl(d.date)}</td><td>-</td><td>${fmt(d.from)}</td><td>-</td><td>ongoing</td>${del(d)}</tr>`);
+  $('hist').innerHTML='<tr><th>Day</th><th>Predicted</th><th>Actual start</th><th>Off by</th><th>Ended</th><th></th></tr>'+open.join('')+rows.join('');
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+    if(confirm('Delete '+lbl(b.dataset.del)+'?'))mutate(d=>d.filter(x=>x.date!==b.dataset.del),'Delete '+b.dataset.del)});
+
+  if(A.stats){
+    const w=A.weights;
+    $('models').innerHTML='<tr><th>Method</th><th>Within 30 min</th><th>Avg miss</th><th>Say now</th></tr>'+A.stats.methods.map((m,k)=>
+      `<tr><td>${m.name}</td><td>${m.n?Math.round(m.hit*100)+'%':'-'}</td><td>${m.n?fmtDur(m.mae):'-'}</td><td>${Math.round(w[k]*100)}% weight</td></tr>`).join('');
+  }else $('models').innerHTML='';
+}
+
+/* ---- actions ---- */
+$('came').onclick=()=>{
+  const today=isoOf(new Date()),t=days.find(d=>d.date===today),m=nowMin();
+  if(t&&t.to!=null&&!confirm('Today is already logged. Replace it?'))return;
+  mutate(d=>merge(d,[{date:today,from:m,to:null}]),'Power came '+today);
+};
+$('went').onclick=()=>{
+  const today=isoOf(new Date()),t=days.find(d=>d.date===today),m=nowMin();
+  if(!t||t.to!=null){$('msg').textContent='Tap "Power came" first, or add the day below.';return}
+  if(m<=t.from){$('msg').textContent='The end is before the start. Use "Add or fix a day".';return}
+  mutate(d=>merge(d,[{date:today,from:t.from,to:m}]),'Power went '+today);
+};
+$('fd').value=isoOf(new Date());
+$('save').onclick=()=>{
+  const d=$('fd').value,f=fromHM($('ff').value),t=fromHM($('ft').value);
+  if(!d||f==null||t==null){$('msg').textContent='Fill in the date, from and to.';return}
+  if(t<=f){$('msg').textContent='"To" must be after "From".';return}
+  mutate(x=>merge(x,[{date:d,from:f,to:t}]),'Log '+d);$('msg').textContent='Saved '+lbl(d)+'.';
+};
+$('doimp').onclick=()=>{
+  const out=[],y=new Date().getFullYear();
+  for(const line of $('imp').value.split(/\r?\n/)){
+    const d=line.match(/(\d{1,2})\/(\d{1,2})/),t=[...line.matchAll(/(\d{1,2}):(\d{2})\s*([AP]M)/gi)];
+    if(d&&t.length>=2){const c=x=>(+x[1]%12+(/p/i.test(x[3])?12:0))*60+ +x[2];out.push({date:y+'-'+p2(d[2])+'-'+p2(d[1]),from:c(t[0]),to:c(t[1])})}
+  }
+  if(!out.length){$('msg').textContent='No rows found. Expected: day, dd/mm, from, to (like 1:30 PM).';return}
+  mutate(x=>merge(x,out),'Import '+out.length+' days');$('imp').value='';$('msg').textContent='Imported '+out.length+' day(s).';
+};
+$('go').value=cfg.owner;$('gr').value=cfg.repo;$('gt').value=cfg.token||'';
+$('gsave').onclick=()=>{
+  cfg={owner:$('go').value.trim(),repo:$('gr').value.trim(),token:$('gt').value.trim()};
+  store('power-gh',cfg);pull();
+};
+render();pull();
+</script>
+</body>
+</html>
